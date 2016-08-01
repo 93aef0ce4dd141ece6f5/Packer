@@ -26,8 +26,6 @@
 #include <wincrypt.h>
 #include <zlib.h>
 
-#include "MemoryModule.h"
-
 #define WIN32_LEAN_AND_MEAN
 #define DEBUG
 #define DEBUG_TITLE "STUB - DEBUG MESSAGE"
