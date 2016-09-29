@@ -1,18 +1,16 @@
 #include <stdio.h>
-#include <stdlib.h>
 #include <stdarg.h>
 #include <windows.h>
 #include <wincrypt.h>
+#include <zlib.h>
 
 #include "packer.h"
-#include "quicklz.h"
 #include "resource.h"
 
 #define WIN32_LEAN_AND_MEAN
 #define DEBUG
 #define DEBUG_TITLE "STUB - DEBUG MESSAGE"
 
-/* Self explanatory */
 VOID Debug(LPCSTR fmt, ...) {
 #ifdef DEBUG
 	va_list args;
@@ -24,7 +22,6 @@ VOID Debug(LPCSTR fmt, ...) {
 #endif
 }
 
-/* Opens a target file to be parsed into a FileStruct */
 FileStruct *LoadFile(LPCSTR szFileName) {
 	Debug("Loading %s...\n", szFileName);
 
@@ -81,7 +78,6 @@ FileStruct *LoadFile(LPCSTR szFileName) {
 	return fs;
 }
 
-/* Updates the stub file with the modified FileStruct information */
 BOOL UpdateStub(LPCSTR szFileName, FileStruct *fs) {
 	// start updating stub's resources
 	HANDLE hUpdate = BeginUpdateResource(szFileName, FALSE);
@@ -108,7 +104,6 @@ BOOL UpdateStub(LPCSTR szFileName, FileStruct *fs) {
 	return TRUE;
 }
 
-/* Stub generator */
 BOOL BuildStub(LPCSTR szFileName, FileStruct *fs) {
 	Debug("Building stub: %s...\n", szFileName);
 
@@ -163,7 +158,6 @@ BOOL BuildStub(LPCSTR szFileName, FileStruct *fs) {
 	return TRUE;
 }
 
-/* Random key generator */
 BOOL GenerateKey(FileStruct *fs) {
 	fs->pKey = (PBYTE)malloc(KEY_LEN);
 	if (fs->pKey == NULL) return FALSE;
@@ -194,35 +188,26 @@ BOOL GenerateKey(FileStruct *fs) {
 	return TRUE;
 }
 
-/* Payload encryption routine using RC4 */
-BOOL Encrypt(FileStruct *fs) {
+// XOR
+BOOL EncryptPayload(FileStruct *fs) {
 	Debug("Encrypting payload...\n");
 
 	Debug("Generating key...\n");
 	if (GenerateKey(fs) == FALSE) return FALSE;
 
-	PBYTE pTempBuffer = malloc(fs->dwBufSize);
-	memcpy(pTempBuffer, fs->pBuffer, fs->dwBufSize);
-
-	struct rc4_state *s = malloc(sizeof(struct rc4_state));
-	rc4_setup(s, fs->pKey, KEY_LEN);
-	rc4_crypt(s, pTempBuffer, fs->dwBufSize);
-	free(s);
-
-	free(fs->pBuffer);
-	fs->pBuffer = pTempBuffer;
+	for (DWORD i = 0; i < fs->dwBufSize; i++)
+		fs->pBuffer[i] ^= fs->pKey[i % KEY_LEN];
 
 	Debug("Encryption routine complete\n");
 	return TRUE;
 }
 
-/* Payload compressions routine using QuickLZ */
-BOOL CompressFile(FileStruct *fs) {
+BOOL CompressPayload(FileStruct *fs) {
 	Debug("Compressing payload...\n");
-
-	qlz_state_compress *state_compress = (qlz_state_compress *)malloc(sizeof(qlz_state_compress));
-	PBYTE pCompressedBuffer = (PBYTE)malloc(fs->dwBufSize + 400);
-	ULONG ulCompressedBufSize = qlz_compress(fs->pBuffer, pCompressedBuffer, fs->dwBufSize, state_compress);
+	
+	PBYTE pCompressedBuffer = (PBYTE)malloc(fs->dwBufSize);
+	ULONG ulCompressedBufSize = compressBound((ULONG)fs->dwBufSize);
+	compress(pCompressedBuffer, &ulCompressedBufSize, fs->pBuffer, fs->dwBufSize);
 
 	fs->pBuffer = pCompressedBuffer;
 	fs->dwBufSize = ulCompressedBufSize;
@@ -241,12 +226,12 @@ int main(int argc, char *argv[]) {
 	if (fs == NULL) return 1;
 
 	Debug("Applying obfuscation...\n");
-	if (CompressFile(fs) == FALSE) {
+	if (CompressPayload(fs) == FALSE) {
 		free(fs);
 		return 1;
 	}
 
-	if (Encrypt(fs) == FALSE) {
+	if (EncryptPayload(fs) == FALSE) {
 		free(fs);
 		return 1;
 	}
@@ -262,7 +247,7 @@ int main(int argc, char *argv[]) {
 	free(fs->pKey);
 	free(fs);
 
-	Debug("\nSuccessfully completed\n");
+	Debug("\nDone\n");
 
 	return 0;
 }

