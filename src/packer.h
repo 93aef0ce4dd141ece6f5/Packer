@@ -2,7 +2,7 @@
 #define FILE_SIZE_RSRC_ID 20
 #define KEY_RSRC_ID 30
 
-#define KEY_LEN 128
+#define KEY_LEN 256
 
 typedef struct _FileStruct {
 	PBYTE pBuffer;

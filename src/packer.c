@@ -1,30 +1,11 @@
-/*
-
-    Compresses and encrypts an executable payload
-    Copyright (C) 2016  93aef0ce4dd141ece6f5
-
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-	along with this program. If not, see <http://www.gnu.org/licenses/>.
-
-*/
-
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdarg.h>
 #include <windows.h>
 #include <wincrypt.h>
-#include <zlib.h>
 
 #include "packer.h"
+#include "quicklz.h"
 #include "resource.h"
 
 #define WIN32_LEAN_AND_MEAN
@@ -209,8 +190,8 @@ BOOL GenerateKey(FileStruct *fs) {
 }
 
 // XOR
-BOOL EncryptPayload(FileStruct *fs) {
-	Debug("EncryptPayloading payload...\n");
+BOOL Encrypt(FileStruct *fs) {
+	Debug("Encrypting payload...\n");
 
 	Debug("Generating key...\n");
 	if (GenerateKey(fs) == FALSE) return FALSE;
@@ -218,16 +199,16 @@ BOOL EncryptPayload(FileStruct *fs) {
 	for (DWORD i = 0; i < fs->dwBufSize; i++)
 		fs->pBuffer[i] ^= fs->pKey[i % KEY_LEN];
 
-	Debug("EncryptPayloadion routine complete\n");
+	Debug("Encryption routine complete\n");
 	return TRUE;
 }
 
-BOOL CompressPayload(FileStruct *fs) {
+BOOL CompressFile(FileStruct *fs) {
 	Debug("Compressing payload...\n");
-	
-	PBYTE pCompressedBuffer = (PBYTE)malloc(fs->dwBufSize);
-	ULONG ulCompressedBufSize = compressBound((ULONG)fs->dwBufSize);
-	compress(pCompressedBuffer, &ulCompressedBufSize, fs->pBuffer, fs->dwBufSize);
+
+	qlz_state_compress *state_compress = (qlz_state_compress *)malloc(sizeof(qlz_state_compress));
+	PBYTE pCompressedBuffer = (PBYTE)malloc(fs->dwBufSize + 400);
+	ULONG ulCompressedBufSize = qlz_compress(fs->pBuffer, pCompressedBuffer, fs->dwBufSize, state_compress);
 
 	fs->pBuffer = pCompressedBuffer;
 	fs->dwBufSize = ulCompressedBufSize;
@@ -237,7 +218,6 @@ BOOL CompressPayload(FileStruct *fs) {
 }
 
 int main(int argc, char *argv[]) {
-	printf("Copyright (C) 2016  93aef0ce4dd141ece6f5\n\n");
 	if (argc < 3) {
 		Debug("Usage: %s [INPUT FILE] [OUTPUT FILE]\n", argv[0]);
 		return 1;
@@ -247,12 +227,12 @@ int main(int argc, char *argv[]) {
 	if (fs == NULL) return 1;
 
 	Debug("Applying obfuscation...\n");
-	if (CompressPayload(fs) == FALSE) {
+	if (CompressFile(fs) == FALSE) {
 		free(fs);
 		return 1;
 	}
 
-	if (EncryptPayload(fs) == FALSE) {
+	if (Encrypt(fs) == FALSE) {
 		free(fs);
 		return 1;
 	}
